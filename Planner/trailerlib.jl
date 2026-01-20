@@ -4,19 +4,34 @@
 # author: Atsushi Sakai(@Atsushi_twi)
 #
 
+@info "trailerlib loaded from" file=@__FILE__
+
+
 module trailerlib
 
 using PyPlot
 using NearestNeighbors
 
 # Vehicle parameter
+# const WB = 3.7  #[m] wheel base: rear to front steer
+# const LT = 8.0 #[m] rear to trailer wheel
+# const W = 2.6 #[m] width of vehicle
+# const LF = 4.5 #[m] distance from rear to vehicle front end of vehicle
+# const LB = 1.0 #[m] distance from rear to vehicle back end of vehicle
+# const LTF = 1.0 #[m] distance from rear to vehicle front end of trailer
+# const LTB = 9.0 #[m] distance from rear to vehicle back end of trailer
+# const MAX_STEER = 0.6 #[rad] maximum steering angle 
+# const TR = 0.5 # Tyre radius [m] for plot
+# const TW = 1.0 # Tyre width [m] for plot
+
+# Ver. 비행기
 const WB = 3.7  #[m] wheel base: rear to front steer
-const LT = 8.0 #[m] rear to trailer wheel
-const W = 2.6 #[m] width of vehicle
+const LT = 3.0 #힌지-트레일러 기준점 거리를 줄임!
+const W = 10.0 #비행기 폭 날개 포함
 const LF = 4.5 #[m] distance from rear to vehicle front end of vehicle
 const LB = 1.0 #[m] distance from rear to vehicle back end of vehicle
-const LTF = 1.0 #[m] distance from rear to vehicle front end of trailer
-const LTB = 9.0 #[m] distance from rear to vehicle back end of trailer
+const LTF = 2.0 # 비행기와 토잉카 사이의 거리
+const LTB = 9.0 # 연결점부터 비행기 꼬리까지의 거리
 const MAX_STEER = 0.6 #[rad] maximum steering angle 
 const TR = 0.5 # Tyre radius [m] for plot
 const TW = 1.0 # Tyre width [m] for plot
@@ -57,16 +72,14 @@ function check_collision(x::Array{Float64},
 
         # println(ids)
     end
-
     return true #OK
-
 end
 
 
 function rect_check(ix::Float64, iy::Float64, iyaw::Float64,
                     ox::Array{Float64}, oy::Array{Float64},
                     vrx::Array{Float64}, vry::Array{Float64}
-                   )
+                   )::Bool
 
     c = cos(-iyaw)
     s = sin(-iyaw)
@@ -83,17 +96,20 @@ function rect_check(ix::Float64, iy::Float64, iyaw::Float64,
             y1 = vry[i] - ly
             x2 = vrx[i+1] - lx
             y2 = vry[i+1] - ly
-            d1 = hypot(x1,y1)
-            d2 = hypot(x2,y2)
-            theta1 = atan(y1,x1)
-            tty = (-sin(theta1)*x2 + cos(theta1)*y2)
-            tmp = (x1*x2+y1*y2)/(d1*d2)
 
-            if tmp >= 1.0
-                tmp = 1.0
-            elseif tmp <= 0.0
-                tmp = 0.0
+            d1 = hypot(x1, y1)
+            d2 = hypot(x2, y2)
+
+            den = d1 * d2
+            if den < 1e-12
+                continue
             end
+
+            theta1 = atan(y1, x1)
+            tty = (-sin(theta1)*x2 + cos(theta1)*y2)
+
+            tmp = (x1*x2 + y1*y2) / den
+            tmp = clamp(tmp, -1.0, 1.0)
 
             if tty >= 0.0
                 sumangle += acos(tmp)
@@ -102,14 +118,69 @@ function rect_check(ix::Float64, iy::Float64, iyaw::Float64,
             end
         end
 
-        if sumangle >= pi
-            return false #collision
+        if abs(sumangle) >= (pi - 1e-6)
+            return false # collision
         end
     end
 
-    return true #OK
+    return true # OK
+end
+# 로컬 폴리곤(vrx,vry)을 월드 좌표 꼭짓점으로 변환
+function poly_world(ix::Float64, iy::Float64, iyaw::Float64,
+                    vrx::Array{Float64}, vry::Array{Float64})
+    c = cos(iyaw)
+    s = sin(iyaw)
+    pts = Vector{Tuple{Float64,Float64}}(undef, length(vrx))
+    for i in 1:length(vrx)
+        xw = ix + c*vrx[i] - s*vry[i]
+        yw = iy + s*vrx[i] + c*vry[i]
+        pts[i] = (xw, yw)
+    end
+    return pts
 end
 
+function check_collision_debug(x::Array{Float64},
+                               y::Array{Float64},
+                               yaw::Array{Float64},
+                               kdtree::KDTree,
+                               ox::Array{Float64},
+                               oy::Array{Float64},
+                               wbd::Float64,
+                               wbr::Float64,
+                               vrx::Array{Float64},
+                               vry::Array{Float64};
+                               label::String = "",
+                               max_near::Int = 12)::Bool # check_collision 충돌 시 원인 근처 점 출력
+    for (ix, iy, iyaw) in zip(x, y, yaw)
+        cx = ix + wbd*cos(iyaw)
+        cy = iy + wbd*sin(iyaw)
+
+        ids = inrange(kdtree, [cx, cy], wbr, true)
+
+        if length(ids) == 0
+            continue
+        end
+
+        # 폴리곤 충돌 검사
+        if !rect_check(ix, iy, iyaw, ox[ids], oy[ids], vrx, vry)
+            pts = Vector{Tuple{Float64,Float64,Float64}}()
+            sizehint!(pts, min(length(ids), max_near))
+            for idx in ids
+                d = hypot(ox[idx] - cx, oy[idx] - cy)
+                push!(pts, (ox[idx], oy[idx], d))
+            end
+            sort!(pts, by = p -> p[3])
+            near = pts[1:min(end, max_near)]
+
+            poly = poly_world(ix, iy, iyaw, vrx, vry)
+
+            @info "[COLLISION][$label]" pose=(ix=ix,iy=iy,yaw=iyaw) bubble=(cx=cx,cy=cy,r=wbr) n_inrange=length(ids) near_points=near poly_world=poly
+            return false
+        end
+    end
+
+    return true
+end
 
 
 function calc_trailer_yaw_from_xyyaw(
@@ -148,6 +219,51 @@ function trailer_motion_model(x, y, yaw0, yaw1, D, d, L, delta)
 end
 
 
+# function check_trailer_collision(
+#                     ox::Array{Float64},
+#                     oy::Array{Float64},
+#                     x::Array{Float64},
+#                     y::Array{Float64},
+#                     yaw0::Array{Float64},
+#                     yaw1::Array{Float64};
+#                     kdtree = nothing
+#                    )
+#     """
+#     collision check function for trailer
+
+#     """
+
+#     if kdtree == nothing
+# 		kdtree = KDTree([ox'; oy'])
+#     end
+
+#     vrxt = [LTF, LTF, -LTB, -LTB, LTF]
+#     vryt = [-W/2.0, W/2.0, W/2.0, -W/2.0, -W/2.0]
+
+#     # bubble parameter
+#     DT = (LTF + LTB)/2.0 - LTB
+#     DTR = (LTF + LTB)/2.0 + 0.3 
+
+#     # check trailer
+#     if !check_collision(x, y, yaw1, kdtree, ox, oy, DT, DTR, vrxt, vryt)
+#         return false
+#     end
+
+#     vrxf = [LF, LF, -LB, -LB, LF]
+#     vryf = [-W/2.0, W/2.0, W/2.0, -W/2.0, -W/2.0]
+  
+#     # bubble parameter
+#     DF = (LF + LB)/2.0 - LB
+#     DFR = (LF + LB)/2.0 + 0.3 
+
+#     # check front trailer
+#     if !check_collision(x, y, yaw0, kdtree, ox, oy, DF, DFR, vrxf, vryf)
+#         return false
+#     end
+
+#     return true #OK
+# end
+
 function check_trailer_collision(
                     ox::Array{Float64},
                     oy::Array{Float64},
@@ -155,7 +271,9 @@ function check_trailer_collision(
                     y::Array{Float64},
                     yaw0::Array{Float64},
                     yaw1::Array{Float64};
-                    kdtree = nothing
+                    kdtree = nothing,
+                    debug::Bool = false,
+                    max_near::Int = 12
                    )
     """
     collision check function for trailer
@@ -174,9 +292,16 @@ function check_trailer_collision(
     DTR = (LTF + LTB)/2.0 + 0.3 
 
     # check trailer
-    if !check_collision(x, y, yaw1, kdtree, ox, oy, DT, DTR, vrxt, vryt)
-        return false
+    if debug
+        if !check_collision_debug(x, y, yaw1, kdtree, ox, oy, DT, DTR, vrxt, vryt; label="TRAILER", max_near=max_near)
+            return false
+        end
+    else
+        if !check_collision(x, y, yaw1, kdtree, ox, oy, DT, DTR, vrxt, vryt)
+            return false
+        end
     end
+
 
     vrxf = [LF, LF, -LB, -LB, LF]
     vryf = [-W/2.0, W/2.0, W/2.0, -W/2.0, -W/2.0]
@@ -186,9 +311,16 @@ function check_trailer_collision(
     DFR = (LF + LB)/2.0 + 0.3 
 
     # check front trailer
-    if !check_collision(x, y, yaw0, kdtree, ox, oy, DF, DFR, vrxf, vryf)
-        return false
+    if debug
+        if !check_collision_debug(x, y, yaw0, kdtree, ox, oy, DF, DFR, vrxf, vryf; label="TRUCK", max_near=max_near)
+            return false
+        end
+    else
+        if !check_collision(x, y, yaw0, kdtree, ox, oy, DF, DFR, vrxf, vryf)
+            return false
+        end
     end
+
 
     return true #OK
 end

@@ -110,7 +110,7 @@ function calc_hybrid_astar_path(sx::Float64, sy::Float64, syaw::Float64, syaw1::
     fnode = nothing
     open[calc_index(nstart, c)] = nstart
     pq = PriorityQueue{Int64,Float64}()
-    enqueue!(pq, calc_index(nstart, c), calc_cost(nstart, h_dp, ngoal, c))
+    pq[calc_index(nstart, c)] = calc_cost(nstart, h_dp, ngoal, c)
 
     u, d = calc_motion_inputs()
     nmotion = length(u)
@@ -134,27 +134,42 @@ function calc_hybrid_astar_path(sx::Float64, sy::Float64, syaw::Float64, syaw1::
             break
         end
 
-        inityaw1 = current.yaw1[1]
+        inityaw1 = current.yaw1[end]
+        ok = 0; bad_bound = 0; bad_coll = 0
 
         for i in 1:nmotion
             node = calc_next_node(current, c_id, u[i], d[i], c)
-
-            if !verify_index(node, c, ox, oy, inityaw1, kdtree) continue end
-
-            node_ind = calc_index(node, c)
-
-            # If it is already in the closed set, skip it
-            if haskey(closed, node_ind)  continue end
-
-            if !haskey(open, node_ind)
-                open[node_ind] = node
-                enqueue!(pq, node_ind, calc_cost(node, h_dp, ngoal, c))
-            else
-                if open[node_ind].cost > node.cost
-                    # If so, update the node to have a new parent
-                    open[node_ind] = node
-                end
+            
+            # boundary 체크만 따로
+            if (node.xind - c.minx) >= c.xw || (node.xind - c.minx) <= 0 ||
+            (node.yind - c.miny) >= c.yw || (node.yind - c.miny) <= 0
+                bad_bound += 1
+                continue
             end
+
+            steps = MOTION_RESOLUTION*node.directions
+            yaw1 = trailerlib.calc_trailer_yaw_from_xyyaw(node.x, node.y, node.yaw, current.yaw1[end], steps)
+            ind = 1:SKIP_COLLISION_CHECK:length(node.x)
+            if !trailerlib.check_trailer_collision(ox, oy, node.x[ind], node.y[ind], node.yaw[ind], yaw1[ind], kdtree=kdtree)
+                bad_coll += 1
+                continue
+            end
+
+            # --- after collision check passed ---
+            nid = calc_index(node, c)
+
+            # 이미 closed면 skip
+            if haskey(closed, nid)
+                continue
+            end
+
+            # open에 없거나, 더 좋은 cost면 갱신
+            if !haskey(open, nid) || node.cost < open[nid].cost
+                open[nid] = node
+                pq[nid] = calc_cost(node, h_dp, ngoal, c)
+            end
+
+            ok += 1
         end
     end
 
@@ -322,7 +337,14 @@ function verify_index(node::Node, c::Config, ox, oy, inityaw1, kdtree)
     steps = MOTION_RESOLUTION*node.directions
     yaw1 = trailerlib.calc_trailer_yaw_from_xyyaw(node.x, node.y, node.yaw, inityaw1, steps)
     ind = 1:SKIP_COLLISION_CHECK:length(node.x)
-    if !trailerlib.check_trailer_collision(ox, oy, node.x[ind], node.y[ind], node.yaw[ind], yaw1[ind], kdtree = kdtree)
+
+    ok = trailerlib.check_trailer_collision(ox, oy, node.x[ind], node.y[ind], node.yaw[ind], yaw1[ind], kdtree=kdtree)
+    if !ok
+        # 버블 내 근처점 개수 대충 찍기
+        # cx = node.x[ind][end] + ((trailerlib.LF+trailerlib.LB)/2.0 - trailerlib.LB)*cos(node.yaw[ind][end])
+        # cy = node.y[ind][end] + ((trailerlib.LF+trailerlib.LB)/2.0 - trailerlib.LB)*sin(node.yaw[ind][end])
+        # ids = trailerlib.inrange(kdtree, [cx, cy], ((trailerlib.LF+trailerlib.LB)/2.0 + 0.3), true)
+        # @info "[DBG coll]" x=node.x[ind][end] y=node.y[ind][end] yaw=node.yaw[ind][end] nnear=length(ids)
         return false
     end
 

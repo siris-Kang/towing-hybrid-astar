@@ -1,0 +1,37 @@
+# Unity project
+
+Unity/TowingProject/[Ll]ibrary/
+Unity/TowingProject/[Tt]emp/
+Unity/TowingProject/[Oo]bj/
+Unity/TowingProject/[Bb]uild/
+Unity/TowingProject/[Bb]uilds/
+Unity/TowingProject/[Ll]ogs/
+Unity/TowingProject/[Uu]serSettings/
+Unity/TowingProject/[Mm]emoryCaptures/
+Unity/TowingProject/[Rr]ecordings/
+
+Unity/TowingProject/[Dd]erivedDataCache/
+Unity/TowingProject/.vs/
+Unity/TowingProject/.vscode/
+Unity/TowingProject/.idea/
+
+*.csproj
+*.sln
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.DotSettings.user
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Crash / dump
+sysinfo.txt
+*.stackdump
+
+# Planner logs
+Planner/planner_logs/
+planner_logs/
