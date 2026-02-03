@@ -17,7 +17,8 @@
 - 테스트 방법 & 디버깅 포인트
 - 개선 방안
 
-<br>
+
+---
 
 # 개요
 
@@ -39,11 +40,11 @@
 
 - .ioc
     
-    ![image.png](attachment:51c2e87c-eae0-4f59-8989-35708fad627e:image.png)
+    ![image.png](images/CubeIDEPinmap.png)
     
 - Schematic
     
-    ![image.png](attachment:4a6687d2-517f-451f-a536-44a30b1f875a:image.png)
+    ![image.png](images/F103RBSchematic.png)
     
 
 **UART:** USART2 사용 (RX 인터럽트 기반 수신)
@@ -136,6 +137,8 @@ PWM_Freq = TimerClk / ((PSC+1) * (ARR+1))
 CCR = (Counter Period + 1) * 0.30
 ```
 
+---
+
 # UART 패킷 명세
 
 ## 패킷 형식
@@ -161,6 +164,8 @@ CCR = (Counter Period + 1) * 0.30
 
 - `crc16_ibm(pkt, 6)` 결과를 pkt[6], pkt[7]에 넣음
 - STM32는 `crc_rx_le` / `crc_rx_be` 둘 다 비교해서 통과 처리
+
+---
 
 # 펌웨어 아키텍처
 
@@ -189,6 +194,8 @@ CCR = (Counter Period + 1) * 0.30
 - `steer_servo.c` : TIM3_CH3, -100~100 → 1000~2000us 매핑
 - `dock.c` : TIM3_CH1/2, 도킹 시퀀스(내려가기-닫기-올리기 / 내려가기-열기-올리기)
 
+---
+
 # FreeRTOS
 
 ## Tasks & Priority
@@ -211,6 +218,8 @@ CCR = (Counter Period + 1) * 0.30
     - 길이 1 = 최신 명령만을 듣고 차량 상태 업데이트
     - put 시 꽉 찼으면 하나 빼고 최신으로 overwrite (`queue_put_latest`)
 - UART는 `osThreadFlagsSet(UartRxTaskHandle, UART_RX_FLAG)`로 깨움
+
+---
 
 # Drivers(motor/steer/dock)
 
@@ -242,6 +251,8 @@ CCR = (Counter Period + 1) * 0.30
 - abort checker:
     - dock_abort_check(): g_safe_stop이면 abort
 
+---
+
 # Safety (Timeout/Enable/E-stop latch)
 
 정지 조건이 **절대 우선**
@@ -262,6 +273,8 @@ SafetyTask 기준 상태 분류:
 
 `estop_latched`는 수신 시 1로 세팅되고, 코드상 자동 해제가 없음 (수정)
 
+---
+
 # 동작 시나리오
 
 ### 정상 주행
@@ -280,6 +293,8 @@ SafetyTask 기준 상태 분류:
 ### 도킹 해제(Abort)
 
 - DOCK_ABORT가 0→1 엣지로 들어오면 `Dock_RunReleaseSequence()`
+
+---
 
 # 개선 방안
 
